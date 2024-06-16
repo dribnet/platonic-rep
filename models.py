@@ -1,5 +1,6 @@
 import torch
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig, AutoTokenizer
+from transformers import AutoModel
 
 
 def auto_determine_dtype():
@@ -39,14 +40,26 @@ def load_llm(llm_model_path, qlora=False, force_download=False):
             bnb_4bit_quant_type="nf4",
         )
                 
-    language_model = AutoModelForCausalLM.from_pretrained(
+    language_model = AutoModel.from_pretrained(
             llm_model_path,
-            device_map="auto",
+            trust_remote_code=True,
+            # device_map="auto",
             quantization_config=quantization_config,
             torch_dtype=torch_dtype,
             force_download=force_download,
             output_hidden_states=True,
-    ).eval()
+    ).eval().to("cuda")
+
+
+    # language_model = AutoModelForCausalLM.from_pretrained(
+    #         llm_model_path,
+    #         trust_remote_code=True,
+    #         # device_map="auto",
+    #         quantization_config=quantization_config,
+    #         torch_dtype=torch_dtype,
+    #         force_download=force_download,
+    #         output_hidden_states=True,
+    # ).eval().to("cuda")
     
     return language_model
 

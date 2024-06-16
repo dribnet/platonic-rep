@@ -14,15 +14,19 @@ platonic_metric = platonic.Alignment(
 
 # load texts
 texts = platonic_metric.get_data(modality="text")
+print(f"First text: {texts[0]}")
 
 # your model (e.g. we will use open_llama_7b as an example)
-model_name = "openlm-research/open_llama_7b"
+# model_name = "openlm-research/open_llama_7b"
+# model_name = "bert-base-cased"
+# model_name = "mixedbread-ai/mxbai-embed-2d-large-v1"
 language_model = load_llm(model_name, qlora=False)
 device = next(language_model.parameters()).device
 tokenizer = load_tokenizer(model_name)
 
 # extract features
 tokens = tokenizer(texts, padding="longest", return_tensors="pt")        
+print(tokens[0])
 
 llm_feats = []
 batch_size = 16
@@ -41,6 +45,7 @@ for i in trange(0, len(texts), batch_size):
     # import ipdb; ipdb.set_trace()
     
 llm_feats = torch.cat(llm_feats)
+print("LLM FEATS SIZE IS: ", llm_feats.shape)
 
 # compute score
 score = platonic_metric.score(llm_feats, metric="mutual_knn", topk=10, normalize=True)

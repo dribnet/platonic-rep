@@ -344,11 +344,15 @@ def remove_outliers(feats, q, exact=False, max_threshold=None):
 
 if __name__ == "__main__":
     import torch.nn.functional as F
-    torch.manual_seed(0)
-    feats_A = torch.randn(64, 8192)
-    feats_B = torch.randn(64, 8192)
-    feats_A = F.normalize(feats_A, dim=-1)
-    feats_B = F.normalize(feats_B, dim=-1)
+    torch.manual_seed(1)
+    feats_A = torch.arange(0, 999).unsqueeze(1)
+    feats_B = torch.arange(1000, 1999).unsqueeze(1)
+    # feats_A = torch.randn(1000, 1)
+    # feats_B = torch.randn(1000, 1)
+    # feats_A = torch.randn(1000, 1)
+    # feats_B = torch.randn(1000, 1)
+    # feats_A = F.normalize(feats_A, dim=-1)
+    # feats_B = F.normalize(feats_B, dim=-1)
 
     import time 
     trials = 10

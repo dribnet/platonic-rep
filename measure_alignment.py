@@ -26,7 +26,7 @@ def prepare_features(feats, q=0.95, exact=False):
     return feats.cuda()
 
 
-def compute_score(x_feats, y_feats, metric="mutual_knn", topk=10, normalize=True):
+def compute_score(x_feats, y_feats, metric="mutual_knn", topk=10, normalize=True, only_layer=None):
     """
     Uses different layer combinations of x_feats and y_feats to find the best alignment
     Args:
@@ -39,10 +39,21 @@ def compute_score(x_feats, y_feats, metric="mutual_knn", topk=10, normalize=True
     best_alignment_indices = None
     best_alignment_score = 0
 
-    for i in range(-1, x_feats.shape[1]):
+    x_range = range(-1, x_feats.shape[1])
+    y_range = range(-1, y_feats.shape[1])
+
+    if only_layer is not None:
+        if isinstance(only_layer, list):
+            x_layer, y_layer = only_layer
+        else:
+            x_layer = y_layer = only_layer
+        x_range = range(x_layer, x_layer+1)
+        y_range = range(y_layer, y_layer+1)
+
+    for i in x_range:
         x = x_feats.flatten(1, 2) if i == -1 else x_feats[:, i, :]
 
-        for j in range(-1, y_feats.shape[1]):
+        for j in y_range:
             y = y_feats.flatten(1, 2) if j == -1 else y_feats[:, j, :]
 
             kwargs = {}
