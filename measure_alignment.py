@@ -100,7 +100,7 @@ def compute_alignment(x_feat_paths, y_feat_paths, metric, topk, precise=True):
     pbar = tqdm(total=len(y_feat_paths) * len(x_feat_paths))
 
     for i, x_fp in enumerate(x_feat_paths):
-        x_feats = prepare_features(torch.load(x_fp, map_location="cuda:0")["feats"].float(), exact=precise)
+        x_feats = prepare_features(torch.load(x_fp, map_location="cpu")["feats"].float(), exact=precise)
             
         for j, y_fp in enumerate(y_feat_paths):
             if symmetric_metric:
@@ -108,7 +108,7 @@ def compute_alignment(x_feat_paths, y_feat_paths, metric, topk, precise=True):
                     pbar.update(1)
                     continue           
                         
-            y_feats = prepare_features(torch.load(y_fp, map_location="cuda:0")["feats"].float(), exact=precise)
+            y_feats = prepare_features(torch.load(y_fp, map_location="cpu")["feats"].float(), exact=precise)
             best_score, best_indices = compute_score(y_feats, x_feats, metric=metric, topk=topk)
             
             alignment_scores[i, j] = best_score

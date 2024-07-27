@@ -10,9 +10,12 @@ from pprint import pprint
 from measure_alignment import compute_score, prepare_features
 from metrics import compute_nearest_neighbors
 import torch.nn.functional as F
+import numpy as np
+from matplotlib import pyplot
 
 import csv
 import sys
+import os
 
 texts = []
 with open("5000-more-common.txt", "r", newline="") as file:
@@ -24,14 +27,14 @@ with open("5000-more-common.txt", "r", newline="") as file:
 # print(lines[:5])
 # sys.exit(0)
 
-device = "cuda"
+device = "cpu"
 dtype=torch.float
 
 # your model (e.g. we will use open_llama_7b as an example)
 # model_name = "openlm-research/open_llama_7b"
-model_name1 = "bert-base-cased"
+model_name1 = "bert-base-uncased"
 # model_name1 = "mixedbread-ai/mxbai-embed-large-v1"
-model_name2 = "bert-base-cased"
+model_name2 = "bert-base-uncased"
 # model_name2 = "bert-base-uncased"
 # model_name2 = "mixedbread-ai/mxbai-embed-2d-large-v1"
 model_names = [model_name1, model_name2]
@@ -39,62 +42,112 @@ model_names = [model_name1, model_name2]
 # https://stackoverflow.com/a/68525048
 
 model_results = []
-def diff_all_rows(x): 
-   y = x[None] - x[:, None] 
-   ind = torch.tril_indices(x.shape[0], x.shape[0], offset=-1)
-   return y[ind[0], ind[1]]
 
 for model_name in model_names:
-    language_model = load_llm(model_name, qlora=False)
-    tokenizer = load_tokenizer(model_name)
-
-    # extract features
-    tokens = tokenizer(texts, padding="longest", return_tensors="pt")        
-    print("some tokens", tokens[0])
-
-    batch_size = 16
-    feature_pairs = []
-
     llm_feats = []
-    for i in trange(0, len(texts), batch_size):
-        token_inputs = {k: v[i:i+batch_size].to(device).long() for (k, v) in tokens.items()}
-        with torch.no_grad():
-            llm_output = language_model(
-                input_ids=token_inputs["input_ids"],
-                attention_mask=token_inputs["attention_mask"],
-                output_hidden_states=True
-            )
-        feats = torch.stack(llm_output["hidden_states"]).permute(1, 0, 2, 3).cpu()
-        mask = token_inputs["attention_mask"].unsqueeze(-1).unsqueeze(1).cpu()
-        feats = (feats * mask).sum(2) / mask.sum(2)
-        llm_feats.append(feats)
-        # import ipdb; ipdb.set_trace()
-    llm_feats = torch.cat(llm_feats)
+    outfile = f"outputs/vectors_{model_name}.npy"
+    if os.path.exists(outfile):
+        feats1 = np.load(outfile)
+        llm_feats = torch.tensor(feats1)
+    else:
+        language_model = load_llm(model_name, qlora=False)
+        tokenizer = load_tokenizer(model_name)
+
+        # extract features
+        tokens = tokenizer(texts, padding="longest", return_tensors="pt")        
+        print("some tokens", tokens[0])
+
+        batch_size = 16
+        feature_pairs = []
+
+        for i in trange(0, len(texts), batch_size):
+            token_inputs = {k: v[i:i+batch_size].to(device).long() for (k, v) in tokens.items()}
+            with torch.no_grad():
+                llm_output = language_model(
+                    input_ids=token_inputs["input_ids"],
+                    attention_mask=token_inputs["attention_mask"],
+                    output_hidden_states=True
+                )
+            feats = torch.stack(llm_output["hidden_states"]).permute(1, 0, 2, 3).cpu()
+            mask = token_inputs["attention_mask"].unsqueeze(-1).unsqueeze(1).cpu()
+            feats = (feats * mask).sum(2) / mask.sum(2)
+            llm_feats.append(feats)
+            # import ipdb; ipdb.set_trace()
+        llm_feats = torch.cat(llm_feats)
+        feats1 = llm_feats.cpu().detach().numpy()
+        np.save(outfile, feats1)
+
     model_results.append(llm_feats)
 
-ONLY_LAYER = 2
+# https://stackoverflow.com/a/59187836
+def to_positive_definitive(M):
+    M = np.matrix(M)
+    M = (M + M.T) * 0.5
+    k = 1
+    I = np.eye(M.shape[0])
+    w, v = np.linalg.eig(M)
+    min_eig = v.min()
+    M += (-min_eig * k * k + np.spacing(min_eig)) * I
+    return M
 
-def score_pairs(features1, features2, topk):
-    """ 
-    Args:
-        features (torch.Tensor): features to compare
-        metric (str): metric to use
-        *args: additional arguments for compute_score / metrics.AlignmentMetrics
-        **kwargs: additional keyword arguments for compute_score / metrics.AlignmentMetrics
-    Returns:
-        dict: scores for each model organized as 
-            {model_name: (score, layer_indices)} 
-            layer_indices are the index of the layer with maximal alignment
-    """
-    result = compute_score(
-        # prepare_features(features1, exact=True).to(device=device, dtype=dtype), 
-        # prepare_features(features2, exact=True).to(device=device, dtype=dtype),
-        # prepare_features(features1, exact=True).to(dtype=dtype), 
-        # prepare_features(features2, exact=True).to(dtype=dtype),
-        features1.to(dtype=dtype), 
-        features2.to(dtype=dtype),
-        "mutual_knn", topk=topk, normalize=False, only_layer=ONLY_LAYER)
-    return result
+def validate_positive_definitive(M):   
+    try:
+        np.linalg.cholesky(M)
+    except np.linalg.LinAlgError:
+        print(f"matrix patch {M.shape}")
+        M = to_positive_definitive(M)
+    #Print the eigenvalues of the Matrix
+    # print(np.linalg.eigvalsh(p))
+    return M
+# M = validate_positive_definitive(M)
+# print(M)
+
+# https://github.com/Cysu/open-reid/commit/61f9c4a4da95d0afc3634180eee3b65e38c54a14
+def validate_cov_matrix(M):
+    M = (M + M.T) * 0.5
+    k = 0
+    I = np.eye(M.shape[0])
+    while True:
+        try:
+            _ = np.linalg.cholesky(M)
+            break
+        except np.linalg.LinAlgError:
+            # Find the nearest positive definite matrix for M. Modified from
+            # http://www.mathworks.com/matlabcentral/fileexchange/42885-nearestspd
+            # Might take several minutes
+            k += 1
+            w, v = np.linalg.eig(M)
+            min_eig = v.min()
+            M += (-min_eig * k * k + np.spacing(min_eig)) * I
+    return M
+
+# https://gist.github.com/mdouze/6cc12fa967e5d9911580ef633e559476
+def mahalnobis_to_L2(x_torch):
+    return x_torch
+
+    # print(f"input is {x_torch.shape}")
+    x = x_torch.cpu().detach().numpy()
+    x = np.swapaxes(x,0,1)
+    # compute and visualize the covariance matrix
+    xc = x - x.mean(0)
+    cov = np.dot(xc.T, xc) / xc.shape[0]
+    # print(f"cov is {cov}")
+    pyplot.imsave("before.png", cov)
+
+    # map the vectors back to a space where they follow a unit Gaussian
+    cov = validate_cov_matrix(cov)
+    L = np.linalg.cholesky(cov)
+    mahalanobis_transform = np.linalg.inv(L)
+    y = np.dot(x, mahalanobis_transform.T)
+
+    # covariance should be diagonal in that space...
+    yc = y - y.mean(0)
+    ycov = np.dot(yc.T, yc) / yc.shape[0]
+    pyplot.imsave("after.png", ycov)
+
+    y = np.swapaxes(y,0,1)
+
+    return(torch.tensor(y))
 
 def manual_score(features1, features2, topk, layer1, layer2, norm1, norm2):
     metric = "mutual_knn"
@@ -102,12 +155,14 @@ def manual_score(features1, features2, topk, layer1, layer2, norm1, norm2):
         x = features1.flatten(1, 2).to(dtype=dtype)
     else:
         x = features1[:, layer1, :].to(dtype=dtype)
+    x = mahalnobis_to_L2(x)
     if norm1:
         x = F.normalize(x, p=2, dim=-1)
     if layer2 == -1:
         y = features2.flatten(1, 2).to(dtype=dtype)
     else:
         y = features2[:, layer2, :].to(dtype=dtype)
+    y = mahalnobis_to_L2(y)
     if norm2:
         y = F.normalize(y, p=2, dim=-1)
     # cur_s = metrics.AlignmentMetrics.measure(metric, x, y, topk=topk)
@@ -148,33 +203,18 @@ def select_random_subset(features1, features2, texts, bs):
     # sub_texts = texts[index]
     return [sub_features1, sub_features2, sub_texts]
 
-def select_random_subset_d1(features1, features2, texts, bs):
-    num_features = features1.shape[0]
-    indexA = torch.randperm(num_features)[:bs]
-    indexB = torch.randperm(num_features)[:bs]
-    print("random subset starts with ", indexA[:5], indexB[:5])
-    sub_features1 = features1[indexA] - features1[indexB]
-    sub_features2 = features2[indexA] - features2[indexB]
-    # flat list version
-    sub_texts = [f"{texts[indexA[i]]}:{texts[indexB[i]]}" for i in range(bs)]
-    # sub_texts = texts[index]
-    return [sub_features1, sub_features2, sub_texts]
-
 def build_standard_score(features1, features2, texts):
-    # for bs in [4000, 2000, 1000, 500, 200]:
-    # for bs in [4000, 1000, 200]:
-    # for bs in [500, 5000]:
-    for bs in [500, 2000, 5000]:
+    # features1 = torch.randn_like(features1)
+    # features2 = torch.randn_like(features2)
+    for bs in [1000, 5000]:
         [f1, f2, t] = select_random_subset(features1, features2, texts, bs)
-        # for i in [1, 2, 5, 10, 20]:
-        # for i in [1, 2, 5, 10, 20, 50]:
-        for i in [1, 5, 20, 50]:
-            # if i < 10:
-            #     gimme_example(f1, f2, t, i)
-            # s1 = score_pairs(f1, f2, i)
-            # print(f"score s={bs}, k={i}: {s1}")
-            s2 = manual_score(f1, f2, i, 1, -1, True, True)
-            print(f"manual score s={bs}, k={i}: {s2}")
+        # for i in [1, 5, 20, 50]:
+        for p in [0.25, 1, 5, 10, 20, 50]:
+            i = int(bs * p / 100.0)
+            s2 = manual_score(f1, f2, i, 1, 2, False, False)
+            boost = s2 - (p / 100.0)
+            # print(f"manual score s={bs}, k={i}: {s2}")
+            print(f"score s={bs}, p={p}% k={i}: {s2:4.2f}, boost={boost:4.2f}")
 
 print(f"LLM {model_names[0]} FEATS SIZE IS: ", model_results[0].shape)
 print(f"LLM {model_names[1]} FEATS SIZE IS: ", model_results[1].shape)

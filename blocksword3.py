@@ -25,10 +25,10 @@ dtype=torch.float
 
 # your model (e.g. we will use open_llama_7b as an example)
 # model_name = "openlm-research/open_llama_7b"
-# model_name1 = "bert-base-cased"
-model_name1 = "mixedbread-ai/mxbai-embed-large-v1"
-# model_name2 = "bert-base-uncased"
-model_name2 = "mixedbread-ai/mxbai-embed-2d-large-v1"
+model_name1 = "bert-base-cased"
+# model_name1 = "mixedbread-ai/mxbai-embed-large-v1"
+model_name2 = "bert-base-uncased"
+# model_name2 = "mixedbread-ai/mxbai-embed-2d-large-v1"
 model_names = [model_name1, model_name2]
 
 # https://stackoverflow.com/a/68525048

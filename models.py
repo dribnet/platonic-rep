@@ -48,7 +48,7 @@ def load_llm(llm_model_path, qlora=False, force_download=False):
             torch_dtype=torch_dtype,
             force_download=force_download,
             output_hidden_states=True,
-    ).eval().to("cuda")
+    ).eval().to("cpu")
 
 
     # language_model = AutoModelForCausalLM.from_pretrained(
